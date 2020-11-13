@@ -4,6 +4,7 @@ const sql = require("mysql2/promise");
 const cors = require("cors");
 const PORT = 4000;
 const authorizeUser = require("./authorization/middleware");
+const d3 = require("d3");
 const aws = require("aws-sdk");
 
 // aws.confiq.setPromisesDependency();
@@ -71,43 +72,72 @@ app.post("/create-user", authorizeUser, async (req, resp) => {
 });
 
 // - Update user - for updates in user info
-// app.post("/update-user", authorizeUser, async (req, resp) => {
-//   console.log("update user hit");
-//   try {
-//     const username = req.decodedToken["cognito:username"];
-//     const conn = await pool.getConnection();
-//     //getting original user data
-//     const foo = await conn.execute(
-//       "SELECT * FROM invoiceDb.users WHERE username=?",
-//       [username]
-//     );
-//     const oldData = foo[0][0];
-//     //if entered data is empty store old data and if not store new data
-//     const name =
-//       req.body.name === "" || undefined ? oldData.name : req.body.name;
-//     const companyName =
-//       req.body.companyName === "" || undefined
-//         ? oldData.companyName
-//         : req.body.companyName;
-//     const companyAddress =
-//       req.body.companyAddress === "" || undefined
-//         ? oldData.companyAddress
-//         : req.body.companyAddress;
-//     console.log(name);
-//     console.log(companyName);
-//     console.log(companyAddress);
-//     console.log(oldData);
-//     const response = await conn.execute(
-//       "UPDATE invoiceDb.users SET name=?, companyName=?, companyAddress=? WHERE username=?",
-//       [name, companyName, companyAddress, username]
-//     );
-//     conn.release();
-//     resp.status(201).send(response);
-//   } catch (error) {
-//     console.log(error);
-//     resp.status(500).send(error);
-//   }
-// });
+app.post("/update-user", authorizeUser, async (req, resp) => {
+  console.log("update user hit");
+  try {
+    const username = req.decodedToken["cognito:username"];
+    const conn = await pool.getConnection();
+    //getting original user data
+    const foo = await conn.execute(
+      "SELECT * FROM invoiceDb.users WHERE username=?",
+      [username]
+    );
+    const oldData = foo[0][0];
+    //if entered data is empty store old data and if not store new data
+    const first_name =
+      req.body.firstname === "" || undefined
+        ? oldData.first_name
+        : req.body.firstname;
+    const last_name =
+      req.body.lastname === "" || undefined
+        ? oldData.last_name
+        : req.body.lastname;
+    const company_name =
+      req.body.companyName === "" || undefined
+        ? oldData.company_name
+        : req.body.companyName;
+    const address_street =
+      req.body.addressStreet === "" || undefined
+        ? oldData.address_street
+        : req.body.addressStreet;
+    const address_city =
+      req.body.city === "" || undefined ? oldData.address_city : req.body.city;
+    const address_state =
+      req.body.state === "" || undefined
+        ? oldData.address_state
+        : req.body.state;
+    const address_zip =
+      req.body.zipcode === "" || undefined
+        ? oldData.address_zip
+        : req.body.zipcode;
+    // console.log(first_name);
+    // console.log(last_name);
+    // console.log(company_name);
+    // console.log(address_street);
+    // console.log(address_city);
+    // console.log(address_state);
+    // console.log(address_zip);
+    // console.log(oldData);
+    const response = await conn.execute(
+      "UPDATE invoiceDb.users SET first_name=?, last_name=?, company_name=?, address_street=?, address_city=?, address_state=?, address_zip=? WHERE username=?",
+      [
+        first_name,
+        last_name,
+        company_name,
+        address_street,
+        address_city,
+        address_state,
+        address_zip,
+        username,
+      ]
+    );
+    conn.release();
+    resp.status(201).send(response);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
 
 // - Create a new customer
 app.post("/create-customer", authorizeUser, async (req, resp) => {
@@ -199,6 +229,9 @@ app.post("/create-invoice", authorizeUser, async (req, resp) => {
     const todays_date = Date.now();
     const bill_to = req.body.billTo;
     const user_id = req.decodedToken["cognito:username"];
+    console.log(invoice_uuid);
+    console.log(bill_to);
+    console.log(user_id);
 
     const conn = await pool.getConnection();
     const response = await conn.execute(
@@ -330,6 +363,143 @@ app.post("/customer-search", authorizeUser, async (req, resp) => {
     resp.status(500).send(error);
   }
 });
+
+//Invoice Generating Routes
+//Customer Info
+app.post("/get-customer-info", authorizeUser, async (req, resp) => {
+  console.log("get customer info hit");
+  try {
+    const client_of = req.decodedToken["cognito:username"];
+    const customer_name = req.body.currentCustomer;
+    console.log(customer_name);
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      "SELECT * FROM invoiceDb.customers WHERE customer_name = ?",
+      [customer_name]
+    );
+    console.log(response[0][0]);
+    conn.release();
+    resp.status(200).send(response[0][0]);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
+
+//Order Info
+app.post("/get-order-info", authorizeUser, async (req, resp) => {
+  console.log("get order info hit");
+  try {
+    const user_id = req.decodedToken["cognito:username"];
+    const invoice_uuid = req.body.orderUuid;
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      "SELECT * FROM invoiceDb.orders WHERE invoice_uuid = ?",
+      [invoice_uuid]
+    );
+    conn.release();
+    resp.status(200).send(response[0]);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
+//Invoice Info
+app.post("/get-invoice-info", authorizeUser, async (req, resp) => {
+  console.log("get invoice info hit");
+  try {
+    const user_id = req.decodedToken["cognito:username"];
+    const invoice_uuid = req.body.currentUuid;
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      "SELECT * FROM invoiceDb.invoices WHERE invoice_uuid = ?",
+      [invoice_uuid]
+    );
+    conn.release();
+    resp.status(200).send(response[0]);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
+
+//Stats Display from Views in MySql
+
+app.post("/customer-count", authorizeUser, async (req, resp) => {
+  try {
+    console.log("get customer count hit");
+    const client_of = req.decodedToken["cognito:username"];
+    const conn = await pool.getConnection();
+    let response = await conn.execute(
+      "SELECT COUNT(id) as TotalCustomers FROM invoiceDb.customers WHERE client_of = ?",
+      [client_of]
+    );
+    console.log(response);
+    conn.release();
+    resp.status(200).send(response);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
+
+app.post("/invoice-count", authorizeUser, async (req, resp) => {
+  try {
+    console.log("get invoice count hit");
+    const user_id = req.decodedToken["cognito:username"];
+    const conn = await pool.getConnection();
+    let response = await conn.execute(
+      "SELECT COUNT(id) as TotalInvoices FROM invoiceDb.invoices WHERE user_id = ?",
+      [user_id]
+    );
+    console.log(response);
+    conn.release();
+    resp.status(200).send(response);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
+//SELECT SUM(totals) as ServicesProvided FROM invoiceDb.TotalServicesProvided WHERE user_id =
+
+// function abbreviateNumber(number) {
+//   var SI_POSTFIXES = ["", "k", "M", "G", "T", "P", "E"];
+//   var tier = (Math.log10(Math.abs(number)) / 3) | 0;
+//   if (tier == 0) return number;
+//   var postfix = SI_POSTFIXES[tier];
+//   var scale = Math.pow(10, tier * 3);
+//   var scaled = number / scale;
+//   var formatted = scaled.toFixed(1) + "";
+//   if (/\.0$/.test(formatted))
+//     formatted = formatted.substr(0, formatted.length - 2);
+//   return formatted + postfix;
+// }
+
+app.post("/services-provided", authorizeUser, async (req, resp) => {
+  // displays "2.5k"
+  try {
+    console.log("get services provided count hit");
+    const user_id = req.decodedToken["cognito:username"];
+    const conn = await pool.getConnection();
+    let response = await conn.execute(
+      "SELECT sum(totals) as ServicesProvided FROM invoiceDb.TotalServicesProvided WHERE user_id =?",
+      [user_id]
+    );
+    let result = parseInt(response[0][0].ServicesProvided);
+    // console.log(typeof result);
+    let number = d3.format(".2s")(result);
+    // console.log(d3.format(".3s")(result));
+    // console.log(d3.format(".2s")(2500));
+    console.log(number);
+    // console.log(response[0][0].ServicesProvided);
+    conn.release();
+    resp.status(200).send(number);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
+
 // - S3 route for PDF's and .txt files
 
 app.listen(PORT, () => console.log("app is listing on", PORT));
