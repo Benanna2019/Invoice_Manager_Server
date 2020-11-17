@@ -7,12 +7,13 @@ const authorizeUser = require("./authorization/middleware");
 const d3 = require("d3");
 const aws = require("aws-sdk");
 
-// aws.confiq.setPromisesDependency();
-// aws.config.update({
-//   accessKeyId: process.env.Access_Key_ID,
-//   secretAccessKey: process.env.Secret_Access_Key,
-//   region: "us-east-1",
-// });
+aws.config.setPromisesDependency();
+aws.config.update({
+  accessKeyId: process.env.Access_Key_ID,
+  secretAccessKey: process.env.Secret_Access_Key,
+  region: "us-east-1",
+});
+const s3 = new aws.S3();
 
 const app = express();
 app.use(express.json());
@@ -43,12 +44,6 @@ app.post("/user", authorizeUser, async (req, resp) => {
     console.log(error);
   }
 });
-
-//- Invoice Data for STATS and GRAPHS
-// -- such as Total amounts of invoices
-// -- total amount of fulfilled invoices
-// -- total amount of payments yet to be received
-//
 
 //POST ROUTES
 // - Create a new user
@@ -150,6 +145,7 @@ app.post("/create-customer", authorizeUser, async (req, resp) => {
     const address_city = req.body.city;
     const address_state = req.body.state;
     const address_zip = req.body.zipcode;
+    const email = req.body.email;
     //we want the unique username because the user has their own customers.
     //we do not want other people to be able to login and simply have access to every customer in the DB
     //I think
@@ -157,7 +153,7 @@ app.post("/create-customer", authorizeUser, async (req, resp) => {
 
     const response = await conn.execute(
       //Do I need to include the username in the customer table?
-      "INSERT INTO invoiceDb.customers (customer_name, company, client_of, address_street, address_city, address_state, address_zip) VALUES (?,?,?,?,?,?,?)",
+      "INSERT INTO invoiceDb.customers (customer_name, company, client_of, address_street, address_city, address_state, address_zip, email) VALUES (?,?,?,?,?,?,?,?)",
       [
         customer_name,
         company,
@@ -166,6 +162,7 @@ app.post("/create-customer", authorizeUser, async (req, resp) => {
         address_city,
         address_state,
         address_zip,
+        email,
       ]
     );
 
@@ -226,17 +223,20 @@ app.post("/create-invoice", authorizeUser, async (req, resp) => {
   console.log("create invoice hit");
   try {
     const invoice_uuid = req.body.invoiceUuid;
-    const todays_date = Date.now();
+    const dateObj = new Date(Math.floor(Date.now()));
+    console.log(dateObj);
+    const todays_date = dateObj.toLocaleDateString();
     const bill_to = req.body.billTo;
+    const item_description = req.body.orderDescription;
     const user_id = req.decodedToken["cognito:username"];
-    console.log(invoice_uuid);
-    console.log(bill_to);
-    console.log(user_id);
+    // console.log(invoice_uuid);
+    // console.log(bill_to);
+    // console.log(user_id);
 
     const conn = await pool.getConnection();
     const response = await conn.execute(
-      "INSERT INTO invoiceDb.invoices (invoice_uuid, todays_date, bill_to, user_id) VALUES (?,?,?,?)",
-      [invoice_uuid, todays_date, bill_to, user_id]
+      "INSERT INTO invoiceDb.invoices (invoice_uuid, todays_date, bill_to, item_description, user_id) VALUES (?,?,?,?,?)",
+      [invoice_uuid, todays_date, bill_to, item_description, user_id]
     );
 
     conn.release();
@@ -377,7 +377,7 @@ app.post("/get-customer-info", authorizeUser, async (req, resp) => {
       "SELECT * FROM invoiceDb.customers WHERE customer_name = ?",
       [customer_name]
     );
-    console.log(response[0][0]);
+    // console.log(response[0][0]);
     conn.release();
     resp.status(200).send(response[0][0]);
   } catch (error) {
@@ -434,7 +434,7 @@ app.post("/customer-count", authorizeUser, async (req, resp) => {
       "SELECT COUNT(id) as TotalCustomers FROM invoiceDb.customers WHERE client_of = ?",
       [client_of]
     );
-    console.log(response);
+    // console.log(response);
     conn.release();
     resp.status(200).send(response);
   } catch (error) {
@@ -452,7 +452,7 @@ app.post("/invoice-count", authorizeUser, async (req, resp) => {
       "SELECT COUNT(id) as TotalInvoices FROM invoiceDb.invoices WHERE user_id = ?",
       [user_id]
     );
-    console.log(response);
+    // console.log(response);
     conn.release();
     resp.status(200).send(response);
   } catch (error) {
@@ -460,21 +460,8 @@ app.post("/invoice-count", authorizeUser, async (req, resp) => {
     resp.status(500).send(error);
   }
 });
-//SELECT SUM(totals) as ServicesProvided FROM invoiceDb.TotalServicesProvided WHERE user_id =
 
-// function abbreviateNumber(number) {
-//   var SI_POSTFIXES = ["", "k", "M", "G", "T", "P", "E"];
-//   var tier = (Math.log10(Math.abs(number)) / 3) | 0;
-//   if (tier == 0) return number;
-//   var postfix = SI_POSTFIXES[tier];
-//   var scale = Math.pow(10, tier * 3);
-//   var scaled = number / scale;
-//   var formatted = scaled.toFixed(1) + "";
-//   if (/\.0$/.test(formatted))
-//     formatted = formatted.substr(0, formatted.length - 2);
-//   return formatted + postfix;
-// }
-
+//getting services provides statistics
 app.post("/services-provided", authorizeUser, async (req, resp) => {
   // displays "2.5k"
   try {
@@ -490,7 +477,7 @@ app.post("/services-provided", authorizeUser, async (req, resp) => {
     let number = d3.format(".2s")(result);
     // console.log(d3.format(".3s")(result));
     // console.log(d3.format(".2s")(2500));
-    console.log(number);
+    // console.log(number);
     // console.log(response[0][0].ServicesProvided);
     conn.release();
     resp.status(200).send(number);
@@ -500,6 +487,93 @@ app.post("/services-provided", authorizeUser, async (req, resp) => {
   }
 });
 
+//get most popular customer data
+app.post("/popular-customer", authorizeUser, async (req, resp) => {
+  try {
+    console.log("get popular custoemr hit");
+    const user_id = req.decodedToken["cognito:username"];
+    const conn = await pool.getConnection();
+    let response = await conn.execute(
+      "SELECT bill_to, COUNT(*) AS PopularCustomer FROM invoiceDb.invoices WHERE user_id = ? ORDER BY PopularCustomer DESC ",
+      [user_id]
+    );
+    console.log(response);
+    conn.release();
+    resp.status(200).send(response);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
+
+//getting invoice table data
+
+app.post("/invoice-table-data", authorizeUser, async (req, resp) => {
+  try {
+    console.log("get invoice table data hit");
+    const user_id = req.decodedToken["cognito:username"];
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      "SELECT InvoiceNumber, todays_date, bill_to, item_description, InvoiceTotal, email FROM invoiceDb.InvoiceTableData WHERE user_id = ?",
+      [user_id]
+    );
+    // console.log(response);
+    conn.release();
+    resp.status(200).send(response[0]);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
+
+//PDF PATH
+app.post("/store-invoice-pdf", authorizeUser, async (req, resp) => {
+  console.log("get store pdf hit");
+  try {
+    const user_id = req.decodedToken["cognito:username"];
+    const invoice_uuid = req.body.invoiceUuid;
+    const pdf_path = req.body.pdfPath;
+
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      "INSERT INTO invoiceDb.invoicePdfs (user_id, invoice_uuid, pdf_path) VALUES (?,?,?)",
+      [user_id, invoice_uuid, pdf_path]
+    );
+    console.log(response);
+    conn.release();
+    resp.status(200).send(response);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send({ message: error });
+  }
+});
+
 // - S3 route for PDF's and .txt files
+
+app.post("/get-s3-pdf-path", async (req, resp) => {
+  console.log("get s3 pdf path");
+  try {
+    // const conn = await pool.getConnection()
+    const pdfPath = "public/" + req.body.pdfPath;
+    const params = {
+      Bucket: "invoicemanagerclient16ff7d9dc2e14035b4e6903641f172937-dev",
+      Key: pdfPath,
+      Expires: 30,
+    };
+
+    s3.getSignedUrlPromise("getObject", params)
+      .then((url) => {
+        // console.log(url);
+        resp.status(200).send(url);
+      })
+
+      .catch((err) => resp.status(500).send(err));
+
+    // conn.release();
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
 
 app.listen(PORT, () => console.log("app is listing on", PORT));
